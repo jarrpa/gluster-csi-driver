@@ -22,7 +22,7 @@
 
 [[constraint]]
   name = "github.com/container-storage-interface/spec"
-  branch = "master"
+  version = "~0.2.0"
 
 [[constraint]]
   branch = "master"
@@ -50,4 +50,4 @@
 
 [[constraint]]
   name = "k8s.io/api"
-branch = "master"
+  branch = "master"

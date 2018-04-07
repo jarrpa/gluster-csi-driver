@@ -45,7 +45,7 @@ spec:
       serviceAccount: csi-attacher
       containers:
         - name: csi-attacher
-          image: docker.io/k8scsi/csi-attacher
+          image: k8scsi/csi-attacher:v0.2.0
           args:
             - "--v=5"
             - "--csi-address=$(ADDRESS)"
@@ -58,7 +58,7 @@ spec:
               mountPath: /var/lib/csi/sockets/pluginproxy/
 
         - name: glusterfs
-          image: docker.io/humblec/glusterfsplugin:v0.9
+          image: jarrpa/glusterfsplugin
           args :
             - "--nodeid=$(NODE_ID)"
             - "--endpoint=$(CSI_ENDPOINT)"

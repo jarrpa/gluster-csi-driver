@@ -45,7 +45,7 @@ spec:
       serviceAccount: csi-provisioner
       containers:
         - name: csi-provisioner
-          image: docker.io/k8scsi/csi-provisioner
+          image: k8scsi/csi-provisioner:v0.2.0
           args:
             - "--provisioner=org.gluster.glusterfs"
             - "--csi-address=$(ADDRESS)"
@@ -57,7 +57,7 @@ spec:
             - name: socket-dir
               mountPath: /var/lib/csi/sockets/pluginproxy/
         - name: glusterfs
-          image: docker.io/humblec/glusterfsplugin:v0.8
+          image: jarrpa/glusterfsplugin
           args :
             - "--nodeid=$(NODE_ID)"
             - "--endpoint=$(CSI_ENDPOINT)"

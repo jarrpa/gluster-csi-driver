@@ -17,7 +17,7 @@ limitations under the License.
 package glusterfs
 
 import (
-	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"github.com/golang/glog"
 
 	"github.com/kubernetes-csi/drivers/pkg/csi-common"
@@ -38,26 +38,17 @@ type driver struct {
 
 const (
 	driverName = "org.gluster.glusterfs"
+	driverVersion = "0.2.0"
 )
-
-var (
-	version = csi.Version{
-		Minor: 1,
-	}
-)
-
-func GetSupportedVersions() []*csi.Version {
-	return []*csi.Version{&version}
-}
 
 func NewDriver(nodeID, endpoint string) *driver {
-	glog.Infof("Driver: %v version: %v", driverName, csicommon.GetVersionString(&version))
+	glog.Infof("Driver: %v version: %v", driverName, driverVersion)
 
 	d := &driver{}
 
 	d.endpoint = endpoint
 
-	csiDriver := csicommon.NewCSIDriver(driverName, &version, GetSupportedVersions(), nodeID)
+	csiDriver := csicommon.NewCSIDriver(driverName, driverVersion, nodeID)
 	csiDriver.AddControllerServiceCapabilities(
 		[]csi.ControllerServiceCapability_RPC_Type{
 			csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
