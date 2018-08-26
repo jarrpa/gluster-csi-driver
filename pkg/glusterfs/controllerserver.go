@@ -98,21 +98,30 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 		glog.Errorf("error [%v] when getting cluster nodes for volume %s", err, volume)
 		return nil, fmt.Errorf("error [%v] when getting cluster nodes for volume %s", err, volume)
 	}
-	glog.V(1).Infof("Succesfully created volume '%v'", volName)
 	glusterServer = dynamicHostIps[0]
+
+	volAttrs := map[string]string{
+		"glustervol":        glusterVol,
+		"glusterserver":     glusterServer,
+		"glusterbkpservers": dstrings.Join(dynamicHostIps[0:], ":"),
+		"glusterurl":        glusterURL,
+		"glusteruser":       glusterUser,
+		"glusterusersecret": glusterUserSecret,
+	}
+
+	volent := VolumeEntry{
+		Attributes: volAttrs,
+		Secrets:    req.GetControllerCreateSecrets(),
+	}
+	volCache.add(volume.Id, &volent)
+
+	glog.Infof("Succesfully created volume '%v'", volName)
 
 	resp := &csi.CreateVolumeResponse{
 		//VolumeInfo: &csi.VolumeInfo{
 		Volume: &csi.Volume{
-			Id: volume.Id,
-			Attributes: map[string]string{
-				"glustervol":        glusterVol,
-				"glusterserver":     glusterServer,
-				"glusterbkpservers": dstrings.Join(dynamicHostIps[0:], ":"),
-				"glusterurl":        glusterURL,
-				"glusteruser":       glusterUser,
-				"glusterusersecret": glusterUserSecret,
-			},
+			Id:         volume.Id,
+			Attributes: volAttrs,
 		},
 	}
 	return resp, nil
@@ -153,21 +162,39 @@ func (cs *controllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 		glog.V(3).Infof("invalid delete volume req: %v", req)
 		return nil, err
 	}
-	volumeId := req.VolumeId
-	glog.V(4).Infof("deleting volume %s: req: %v", volumeId, req)
-	cli := gcli.NewClient(defaultGlusterURL, "", "")
-	if cli == nil {
-		glog.Errorf("failed to create glusterfs rest client")
-		return nil, fmt.Errorf("failed to create glusterfs REST client, REST server authentication failed")
-	}
+	volumeId := req.GetVolumeId()
+	glog.V(4).Infof("deleting volume %s", volumeId)
 
-	err := cli.VolumeDelete(volumeId)
+	volent, err := volCache.get(volumeId)
+
 	if err != nil {
-		glog.Errorf("error deleting volume %v ", err)
-		return nil, fmt.Errorf("error deleting volume %v", err)
+		glog.V(1).Info(err.Error())
+		volent, err = findPV(volumeId)
 	}
-	glog.V(1).Infof("volume :%s deleted", volumeId)
 
+	if err == nil {
+		glusterURL := volent.Attributes["glusterurl"]
+		glusterUser := volent.Attributes["glusteruser"]
+		glusterUserSecret := volent.Attributes["glusterusersecret"]
+
+		cli := gcli.NewClient(glusterURL, glusterUser, glusterUserSecret)
+		if cli == nil {
+			glog.Errorf("failed to create glusterfs REST client")
+			return nil, fmt.Errorf("failed to create glusterfs REST client")
+		}
+
+		err := cli.VolumeDelete(volumeId)
+		if err != nil {
+			glog.Errorf("error deleting volume %v ", err)
+			return nil, fmt.Errorf("error deleting volume %v", err)
+		}
+		volCache.remove(volumeId)
+	} else {
+		glog.V(1).Info(err.Error())
+		glog.Errorf("VolumeEntry for volume %s not found in cache", volumeId)
+	}
+
+	glog.Infof("Successfully deleted volume %s", volumeId)
 	return &csi.DeleteVolumeResponse{}, nil
 }
 

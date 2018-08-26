@@ -5,5 +5,7 @@ metadata:
   name: glusterfs
 provisioner: org.gluster.glusterfs
 parameters:
-  glusterurl: http://
-  glusterurlport: 8080
+  glusterurl: "http://demo-heketi.demo.anthill.svc"
+  glusterurlport: "8080"
+  glusteruser: "admin"
+  glusterusersecret: "My Secret"

@@ -19,7 +19,6 @@ package glusterfs
 import (
 	"github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"github.com/golang/glog"
-
 	"github.com/kubernetes-csi/drivers/pkg/csi-common"
 )
 
@@ -37,7 +36,7 @@ type driver struct {
 }
 
 const (
-	driverName = "org.gluster.glusterfs"
+	driverName    = "org.gluster.glusterfs"
 	driverVersion = "0.2.0"
 )
 
@@ -73,6 +72,9 @@ func NewNodeServer(d *driver) *nodeServer {
 }
 
 func (d *driver) Run() {
+	if err := buildVolumeCache(); err != nil {
+		glog.Errorf("failed to build volume cache: %v", err)
+	}
 
 	csicommon.RunControllerandNodePublishServer(d.endpoint, d.csiDriver, NewControllerServer(d), NewNodeServer(d))
 }
