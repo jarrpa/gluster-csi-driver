@@ -22,7 +22,7 @@
 
 [[constraint]]
   name = "github.com/container-storage-interface/spec"
-  version = "~0.2.0"
+  version = "~0.3.0"
 
 [[constraint]]
   branch = "master"
@@ -32,22 +32,35 @@
   name = "google.golang.org/grpc"
   version = "1.7.2"
 
-[[constraint]]
+[[override]]
   name = "github.com/docker/distribution"
-  revision = "edc3ab29cdff8694dd6feb85cfeb4b5f1b38ed9c"
-
-[[constraint]]
-  name = "k8s.io/kubernetes"
+#  revision = "edc3ab29cdff8694dd6feb85cfeb4b5f1b38ed9c"
   branch = "master"
 
 [[constraint]]
   branch = "master"
   name = "github.com/kubernetes-csi/csi-test"
 
-[[constraint]]
-  name = "k8s.io/apimachinery"
-  branch = "master"
+[[override]]
+  name = "k8s.io/kubernetes"
+  version = "~1.10.0"
 
-[[constraint]]
+[[override]]
+  name = "k8s.io/apimachinery"
+  branch = "release-1.10"
+
+[[override]]
   name = "k8s.io/api"
-  branch = "master"
+  branch = "release-1.10"
+
+[[override]]
+  name = "k8s.io/client-go"
+  version = "~7.0.0"
+#
+#[[constraint]]
+#  branch = "release-1.10"
+#  name = "k8s.io/apiextensions-apiserver"
+#
+#[[constraint]]
+#  branch = "release-1.10"
+#  name = "k8s.io/apiserver"

@@ -28,7 +28,7 @@ import (
 	"github.com/kubernetes-csi/drivers/pkg/csi-common"
 	"github.com/pborman/uuid"
 	"golang.org/x/net/context"
-	"k8s.io/kubernetes/pkg/volume"
+	volumeutil "k8s.io/kubernetes/pkg/volume/util"
 )
 
 const (
@@ -52,7 +52,7 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	if req.GetCapacityRange() != nil {
 		volSizeBytes = int64(req.GetCapacityRange().GetRequiredBytes())
 	}
-	volSizeGB := int(volume.RoundUpSize(volSizeBytes, 1024*1024*1024))
+	volSizeGB := int(volumeutil.RoundUpSize(volSizeBytes, 1024*1024*1024))
 
 	//Volume Name
 	volName := req.GetName()
@@ -118,10 +118,10 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	glog.Infof("Succesfully created volume '%v'", volName)
 
 	resp := &csi.CreateVolumeResponse{
-		//VolumeInfo: &csi.VolumeInfo{
 		Volume: &csi.Volume{
-			Id:         volume.Id,
-			Attributes: volAttrs,
+			CapacityBytes: int64(volSizeGB * 1024 * 1024 * 1024),
+			Id:            volume.Id,
+			Attributes:    volAttrs,
 		},
 	}
 	return resp, nil

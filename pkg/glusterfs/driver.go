@@ -37,7 +37,7 @@ type driver struct {
 
 const (
 	driverName    = "org.gluster.glusterfs"
-	driverVersion = "0.2.0"
+	driverVersion = "0.3.0"
 )
 
 func NewDriver(nodeID, endpoint string) *driver {

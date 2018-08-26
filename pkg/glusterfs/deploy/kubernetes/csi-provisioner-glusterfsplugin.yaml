@@ -45,7 +45,7 @@ spec:
       serviceAccount: csi-provisioner
       containers:
         - name: csi-provisioner
-          image: k8scsi/csi-provisioner:v0.2.0
+          image: quay.io/k8scsi/csi-provisioner:v0.3.0
           args:
             - "--provisioner=org.gluster.glusterfs"
             - "--csi-address=$(ADDRESS)"
