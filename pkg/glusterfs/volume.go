@@ -21,6 +21,9 @@ import (
 	"sync"
 
 	"github.com/golang/glog"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 type VolumeEntry struct {
@@ -37,6 +40,27 @@ var (
 func buildVolumeCache() error {
 	volCacheMtx.Lock()
 	defer volCacheMtx.Unlock()
+
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		return err
+	}
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return err
+	}
+	pvs, err := clientset.CoreV1().PersistentVolumes().List(metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for _, pv := range pvs.Items {
+		if pv.Spec.CSI != nil && pv.Spec.CSI.Driver == driverName {
+			vol := VolumeEntry{
+				Attributes: pv.Spec.CSI.VolumeAttributes,
+			}
+			volCache[pv.Spec.CSI.VolumeHandle] = &vol
+		}
+	}
 
 	return nil
 }
