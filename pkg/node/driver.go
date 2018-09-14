@@ -1,8 +1,7 @@
-package glusterfs
+package node
 
 import (
 	"github.com/gluster/gluster-csi-driver/pkg/command"
-	"github.com/gluster/gluster-csi-driver/pkg/controller"
 
 	"github.com/golang/glog"
 )
@@ -14,22 +13,21 @@ type Driver struct {
 
 // New returns a new Driver
 func New(config *command.Config) *Driver {
-	gd := &Driver{}
+	nd := &Driver{}
 
 	if config != nil {
-		gd.Config = config
+		nd.Config = config
 	} else {
-		glog.Error("failed to initialize GlusterD2 driver: config is nil")
+		glog.Error("failed to initialize GlusterFS node driver: config is nil")
 		return nil
 	}
 
-	glog.V(1).Infof("%s initialized", gd.Desc)
+	glog.V(1).Infof("%s initialized", nd.Desc)
 
-	return gd
+	return nd
 }
 
 // Run runs the driver
 func (d *Driver) Run() {
-	SetDefaultClient(d.Name)
-	controller.Run(d.Config)
+	Run(d.Config)
 }

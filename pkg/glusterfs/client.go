@@ -5,121 +5,117 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 
+	cli "github.com/gluster/gluster-csi-driver/pkg/client"
+
+	csi "github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"github.com/gluster/glusterd2/pkg/api"
+	gd2Error "github.com/gluster/glusterd2/pkg/errors"
 	"github.com/gluster/glusterd2/pkg/restclient"
 	"github.com/golang/glog"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 )
 
 const (
-	gd2DefaultInsecure = false
+	gd2DefaultInsecure  = "false"
+	volumeOwnerAnn      = "VolumeOwner"
+	defaultReplicaCount = 3
 )
 
-// GlusterClient holds a GlusterFS REST client and related information
-type GlusterClient struct {
+type gd2Client struct {
+	client       *restclient.Client
+	driverName   string
 	url          string
 	username     string
 	password     string
-	client       *restclient.Client
-	cacert       string
+	caCert       string
 	insecure     string
 	insecureBool bool
 }
 
-// GlusterClients is a map of maps of GlusterClient structs. The first map is
-// indexed by the server/url the GlusterClient connects to. The second map is
-// indexed by the username used on that server.
-type GlusterClients map[string]map[string]*GlusterClient
-
-var (
-	glusterClientCache    = make(GlusterClients)
-	glusterClientCacheMtx sync.Mutex
-)
-
-// SetPointerIfEmpty returns a new parameter if the old parameter is empty
-func SetPointerIfEmpty(old, new interface{}) interface{} {
-	if old == nil {
-		return new
+// SetDefaultClient sets the default client as a gd2Client
+func SetDefaultClient(driverName string) {
+	cli.GlusterClientCache.DefaultClient = gd2Client{
+		driverName: driverName,
 	}
-	return old
 }
 
-// SetStringIfEmpty returns a new parameter if the old parameter is empty
-func SetStringIfEmpty(old, new string) string {
-	if len(old) == 0 {
-		return new
+func (gc gd2Client) checkRespErr(orig error, kind, name string) error {
+	errResp := gc.client.LastErrorResponse()
+	//errResp will be nil in case of No route to host error
+	if errResp != nil && errResp.StatusCode == http.StatusNotFound {
+		return cli.ErrNotFound(kind, name)
 	}
-	return old
+	return orig
 }
 
-func (gc *GlusterClient) setInsecure(new string) {
-	gc.insecure = SetStringIfEmpty(gc.insecure, new)
+func (gc gd2Client) setInsecure(new string) (string, bool) {
+	insecure := cli.SetStringIfEmpty(gc.insecure, new)
 	insecureBool, err := strconv.ParseBool(gc.insecure)
 	if err != nil {
-		glog.Errorf("Bad value [%s] for glusterd2insecure, using default [%s]", gc.insecure, gd2DefaultInsecure)
-		gc.insecure = strconv.FormatBool(gd2DefaultInsecure)
-		insecureBool = gd2DefaultInsecure
+		glog.Errorf("bad value [%s] for glusterd2insecure, using default [%s]", gc.insecure, gd2DefaultInsecure)
+		insecure = gd2DefaultInsecure
+		insecureBool, err = strconv.ParseBool(gd2DefaultInsecure)
+		if err != nil {
+			panic(err)
+		}
 	}
-	gc.insecureBool = insecureBool
+
+	return insecure, insecureBool
 }
 
-// GetClusterNodes returns all nodes in the TSP
-func (gc *GlusterClient) GetClusterNodes() (string, []string, error) {
-	glusterServer := ""
-	bkpservers := []string{}
+func (gc gd2Client) setClient(client gd2Client) (gd2Client, error) {
+	if gc.client == nil {
+		gd2, err := restclient.New(client.url, client.username, client.password, client.caCert, client.insecureBool)
+		if err != nil {
+			return gd2Client{}, fmt.Errorf("failed to create glusterd2 REST client: %s", err)
+		}
+		err = gd2.Ping()
+		if err != nil {
+			return gd2Client{}, fmt.Errorf("error finding glusterd2 server at %s: %v", gc.url, err)
+		}
+
+		gc.client = gd2
+	}
+
+	client.client = gc.client
+	return client, nil
+}
+
+// GetClusterNodes retrieves a list of cluster peer nodes
+func (gc gd2Client) GetClusterNodes(volumeID string) ([]string, error) {
+	glusterServers := []string{}
 
 	peers, err := gc.client.Peers()
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 
-	for i, p := range peers {
-		if i == 0 {
-			for _, a := range p.PeerAddresses {
-				ip := strings.Split(a, ":")
-				glusterServer = ip[0]
-			}
-
-			continue
-		}
+	for _, p := range peers {
 		for _, a := range p.PeerAddresses {
 			ip := strings.Split(a, ":")
-			bkpservers = append(bkpservers, ip[0])
+			glusterServers = append(glusterServers, ip[0])
 		}
-
 	}
 
-	glog.V(2).Infof("Gluster server and Backup servers [%+v,%+v]", glusterServer, bkpservers)
-
-	return glusterServer, bkpservers, nil
+	return glusterServers, nil
 }
 
-// CheckExistingVolume checks if a volume exists in the TSP
-func (gc *GlusterClient) CheckExistingVolume(volumeID string, volSizeMB uint64) error {
+// CheckExistingVolume checks whether a given volume already exists
+func (gc gd2Client) CheckExistingVolume(volumeID string, volSizeBytes int64) error {
 	vol, err := gc.client.Volumes(volumeID)
 	if err != nil {
-		errResp := gc.client.LastErrorResponse()
-		//errResp will be nil in case of No route to host error
-		if errResp != nil && errResp.StatusCode == http.StatusNotFound {
-			return errVolumeNotFound
-		}
-		return err
+		return gc.checkRespErr(err, "volume", volumeID)
 	}
 
 	volInfo := vol[0]
 	// Do the owner validation
-	if glusterAnnVal, found := volInfo.Metadata[volumeOwnerAnn]; !found || (found && glusterAnnVal != glusterfsCSIDriverName) {
-		return fmt.Errorf("volume %s is not owned by %s", volInfo.Name, glusterfsCSIDriverName)
+	if glusterAnnVal, found := volInfo.Metadata[volumeOwnerAnn]; !found || glusterAnnVal != gc.driverName {
+		return cli.ErrExists("volume", volInfo.Name, "owner", glusterAnnVal)
 	}
 
 	// Check requested capacity is the same as existing capacity
-	if volInfo.Capacity != volSizeMB {
-		return fmt.Errorf("volume %s already exists with different size: %d", volInfo.Name, volInfo.Capacity)
+	if volSizeBytes > 0 && volInfo.Capacity != uint64(cli.RoundUpToMiB(volSizeBytes)) {
+		return cli.ErrExists("volume", volInfo.Name, "size (MiB)", strconv.FormatUint(volInfo.Capacity, 10))
 	}
 
 	// If volume not started, start the volume
@@ -135,19 +131,94 @@ func (gc *GlusterClient) CheckExistingVolume(volumeID string, volSizeMB uint64) 
 	return nil
 }
 
-// CheckExistingSnapshot checks if a snapshot exists in the TSP
-func (gc *GlusterClient) CheckExistingSnapshot(snapName, volName string) (*api.SnapInfo, error) {
-	snapInfo, err := gc.client.SnapshotInfo(snapName)
+// CreateVolume creates a new volume
+func (gc gd2Client) CreateVolume(volumeName string, volSizeBytes int64, params map[string]string) error {
+	volMetaMap := make(map[string]string)
+	volMetaMap[volumeOwnerAnn] = gc.driverName
+	volumeReq := api.VolCreateReq{
+		Name:         volumeName,
+		Metadata:     volMetaMap,
+		ReplicaCount: defaultReplicaCount,
+		Size:         uint64(cli.RoundUpToMiB(volSizeBytes)),
+	}
+
+	glog.V(2).Infof("volume create request: %+v", volumeReq)
+	volumeCreateResp, err := gc.client.VolumeCreate(volumeReq)
 	if err != nil {
-		errResp := gc.client.LastErrorResponse()
-		//errResp will be nil in case of No route to host error
-		if errResp != nil && errResp.StatusCode == http.StatusNotFound {
-			return nil, fmt.Errorf("snapshot not found %v", err)
-		}
+		return fmt.Errorf("failed to create volume %s: %v", volumeName, err)
+	}
+
+	glog.V(3).Infof("volume create response: %+v", volumeCreateResp)
+	err = gc.client.VolumeStart(volumeName, true)
+	if err != nil {
+		//we dont need to delete the volume if volume start fails
+		//as we are listing the volumes and starting it again
+		//before sending back the response
+		return fmt.Errorf("failed to start volume %s: %v", volumeName, err)
+	}
+
+	return nil
+}
+
+// DeleteVolume deletes a volume
+func (gc gd2Client) DeleteVolume(volumeID string) error {
+	err := gc.client.VolumeStop(volumeID)
+	if err != nil && err.Error() != gd2Error.ErrVolAlreadyStopped.Error() {
+		return gc.checkRespErr(err, "volume", volumeID)
+	}
+
+	err = gc.client.VolumeDelete(volumeID)
+	if err != nil {
+		return gc.checkRespErr(err, "volume", volumeID)
+	}
+
+	return nil
+}
+
+// ListVolumes lists all volumes in the cluster
+func (gc gd2Client) ListVolumes() ([]*csi.Volume, error) {
+	volumes := []*csi.Volume{}
+
+	vols, err := gc.client.Volumes("")
+	if err != nil {
 		return nil, err
 	}
-	if snapInfo.ParentVolName != volName {
-		return nil, fmt.Errorf("snapshot %s belongs to a different volume %s", snapName, snapInfo.ParentVolName)
+
+	for _, vol := range vols {
+		v, err := gc.client.VolumeStatus(vol.Name)
+		if err != nil {
+			glog.V(1).Infof("error getting volume %s status: %s", vol.Name, err)
+			continue
+		}
+		volumes = append(volumes, &csi.Volume{
+			Id:            vol.Name,
+			CapacityBytes: (int64(v.Size.Capacity)) * cli.MB,
+		})
+	}
+
+	return volumes, nil
+}
+
+func (gc *gd2Client) csiSnap(snap api.SnapInfo) *csi.Snapshot {
+	return &csi.Snapshot{
+		Id:             snap.VolInfo.Name,
+		SourceVolumeId: snap.ParentVolName,
+		CreatedAt:      snap.CreatedAt.Unix(),
+		SizeBytes:      (int64(snap.VolInfo.Capacity)) * cli.MB,
+		Status: &csi.SnapshotStatus{
+			Type: csi.SnapshotStatus_READY,
+		},
+	}
+}
+
+// CheckExistingSnapshot checks if a snapshot exists in the TSP
+func (gc gd2Client) CheckExistingSnapshot(snapName, volName string) (*csi.Snapshot, error) {
+	snapInfo, err := gc.client.SnapshotInfo(snapName)
+	if err != nil {
+		return nil, gc.checkRespErr(err, "snapshot", snapName)
+	}
+	if len(volName) != 0 && snapInfo.ParentVolName != volName {
+		return nil, cli.ErrExists("snapshot", snapName, "parent volume", snapInfo.ParentVolName)
 	}
 
 	if snapInfo.VolInfo.State != api.VolStarted {
@@ -160,42 +231,11 @@ func (gc *GlusterClient) CheckExistingSnapshot(snapName, volName string) (*api.S
 		}
 	}
 
-	ret := api.SnapInfo(snapInfo)
-	return &ret, nil
+	return gc.csiSnap(api.SnapInfo(snapInfo)), nil
 }
 
-// VolumeCreate creates a volume
-func (gc *GlusterClient) VolumeCreate(volumeName string, volSizeMB uint64) error {
-	glog.V(4).Infof("received request to create volume %s with size %d", volumeName, volSizeMB)
-	volMetaMap := make(map[string]string)
-	volMetaMap[volumeOwnerAnn] = glusterfsCSIDriverName
-	volumeReq := api.VolCreateReq{
-		Name:         volumeName,
-		Metadata:     volMetaMap,
-		ReplicaCount: defaultReplicaCount,
-		Size:         volSizeMB,
-	}
-
-	glog.V(2).Infof("volume create request: %+v", volumeReq)
-	volumeCreateResp, err := gc.client.VolumeCreate(volumeReq)
-	if err != nil {
-		return fmt.Errorf("failed to create volume: %v", err)
-	}
-
-	glog.V(3).Infof("volume create response: %+v", volumeCreateResp)
-	err = gc.client.VolumeStart(volumeName, true)
-	if err != nil {
-		//we dont need to delete the volume if volume start fails
-		//as we are listing the volumes and starting it again
-		//before sending back the response
-		return fmt.Errorf("failed to start volume: %v", err)
-	}
-
-	return nil
-}
-
-// SnapshotCreate create snapshot of an existing volume
-func (gc *GlusterClient) SnapshotCreate(snapName, srcVol string) (*api.SnapInfo, error) {
+// CreateSnapshot creates a snapshot of an existing volume
+func (gc gd2Client) CreateSnapshot(snapName, srcVol string) (*csi.Snapshot, error) {
 	snapReq := api.SnapCreateReq{
 		VolName:  srcVol,
 		SnapName: snapName,
@@ -212,12 +252,11 @@ func (gc *GlusterClient) SnapshotCreate(snapName, srcVol string) (*api.SnapInfo,
 		return nil, fmt.Errorf("failed to activate snapshot %s: %v", snapName, err)
 	}
 
-	ret := api.SnapInfo(snapInfo)
-	return &ret, nil
+	return gc.csiSnap(api.SnapInfo(snapInfo)), nil
 }
 
-// SnapshotClone creates a clone of a snapshot
-func (gc *GlusterClient) SnapshotClone(snapName, volName string) error {
+// CloneSnapshot creates a clone of a snapshot
+func (gc gd2Client) CloneSnapshot(snapName, volName string) error {
 	var snapreq api.SnapCloneReq
 
 	glog.V(2).Infof("creating volume from snapshot %s", snapName)
@@ -234,139 +273,73 @@ func (gc *GlusterClient) SnapshotClone(snapName, volName string) error {
 	return nil
 }
 
-// Get retrieves a GlusterClient
-func (gcc GlusterClients) Get(server, user string) (*GlusterClient, error) {
-	glusterClientCacheMtx.Lock()
-	defer glusterClientCacheMtx.Unlock()
-
-	users, ok := gcc[server]
-	if !ok {
-		return nil, fmt.Errorf("Server %s not found in cache", server)
-	}
-	gc, ok := users[user]
-	if !ok {
-		return nil, fmt.Errorf("Client %s / %s not found in cache", server, user)
-	}
-
-	return gc, nil
-}
-
-// FindVolumeClient looks for a volume among current known servers
-func (gcc GlusterClients) FindVolumeClient(volumeID string) (*GlusterClient, error) {
-	var gc *GlusterClient
-
-	config, err := rest.InClusterConfig()
+// DeleteSnapshot deletes a snapshot
+func (gc gd2Client) DeleteSnapshot(snapName string) error {
+	err := gc.client.SnapshotDeactivate(snapName)
 	if err != nil {
-		return nil, err
+		//if errResp != nil && errResp.StatusCode != http.StatusNotFound && err.Error() != gd2Error.ErrSnapDeactivated.Error() {
+		return gc.checkRespErr(err, "snapshot", snapName)
 	}
-	clientset, err := kubernetes.NewForConfig(config)
+	err = gc.client.SnapshotDelete(snapName)
 	if err != nil {
-		return nil, err
+		return gc.checkRespErr(err, "snapshot", snapName)
 	}
-
-	// Search all PVs for volumes from us
-	pvs, err := clientset.CoreV1().PersistentVolumes().List(metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-	pvList := []corev1.PersistentVolume{}
-	for i, pv := range pvs.Items {
-		if pv.Spec.CSI != nil && pv.Spec.CSI.Driver == glusterfsCSIDriverName {
-			pvList = append(pvList, pv)
-
-			if pv.Spec.CSI.VolumeHandle == volumeID {
-				vol := pv.Spec.CSI
-				url := vol.VolumeAttributes["glusterurl"]
-				user := vol.VolumeAttributes["glusteruser"]
-				gc, err = gcc.Get(url, user)
-				if err != nil {
-					glog.V(1).Infof(" Error getting GlusterClient %s / %s: %s", url, user, err)
-					continue
-				}
-				break
-			}
-		}
-		if i == len(pvs.Items)-1 {
-			glog.Warningf("No PV found for volume %s", volumeID)
-		}
-	}
-
-	// If volume not found, cycle through all discovered connections
-	if gc == nil {
-		// Update GlusterClient cache
-		for _, pv := range pvList {
-			attrs := pv.Spec.CSI.VolumeAttributes
-			url := attrs["glusterurl"]
-			user := attrs["glusteruser"]
-			_, err = gcc.Get(url, user)
-			if err != nil {
-				glog.V(1).Infof("GlusterClient for %s / %s not found, initializing", url, user)
-
-				searchClient := &GlusterClient{
-					url:      url,
-					username: user,
-					password: attrs["glusterusersecret"],
-				}
-				err = gcc.Init(searchClient)
-				if err != nil {
-					glog.V(1).Infof("Error initializing GlusterClient %s / %s: %s", url, user, err)
-					continue
-				}
-			}
-		}
-
-		// Check every connection for the volume
-		for server, users := range gcc {
-			for user, searchClient := range users {
-				err = searchClient.CheckExistingVolume(volumeID, 0)
-				if err != nil {
-					glog.V(1).Infof("Error with GlusterClient %s / %s: %s", server, user, err)
-					continue
-				}
-
-				gc = searchClient
-				break
-			}
-			if gc != nil {
-				break
-			}
-		}
-	}
-
-	if gc.client == nil {
-		return nil, errVolumeNotFound
-	}
-	return gc, nil
-}
-
-// Init initializes a GlusterClient
-func (gcc GlusterClients) Init(client *GlusterClient) error {
-	glusterClientCacheMtx.Lock()
-	defer glusterClientCacheMtx.Unlock()
-
-	srvEnt, ok := gcc[client.url]
-	if !ok {
-		gcc[client.url] = make(map[string]*GlusterClient)
-		srvEnt = gcc[client.url]
-	}
-	usrEnt, ok := srvEnt[client.username]
-	if ok {
-		client.password = SetStringIfEmpty(client.password, usrEnt.password)
-		client.client = SetPointerIfEmpty(client.client, usrEnt.client).(*restclient.Client)
-		client.cacert = SetStringIfEmpty(client.cacert, usrEnt.cacert)
-		client.setInsecure(usrEnt.insecure)
-	} else {
-		glog.V(1).Infof("REST client %s / %s not found in cache, initializing", client.url, client.username)
-
-		gd2, err := restclient.New(client.url, client.username, client.password, client.cacert, client.insecureBool)
-		if err == nil {
-			client.client = gd2
-		} else {
-			return fmt.Errorf("Failed to create REST client %s / %s: %s", client.url, client.username, err)
-		}
-	}
-
-	srvEnt[client.username] = client
-
 	return nil
+}
+
+// ListSnapshots lists all snapshots
+func (gc gd2Client) ListSnapshots(snapName, srcVol string) ([]*csi.Snapshot, error) {
+	var snaps []*csi.Snapshot
+	var snaplist api.SnapListResp
+
+	if len(snapName) != 0 {
+		// Get snapshot by name
+		snap, err := gc.client.SnapshotInfo(snapName)
+		if err == nil {
+			snapInfo := api.SnapInfo(snap)
+			snaplist = append(snaplist, api.SnapList{ParentName: snapInfo.ParentVolName, SnapList: []api.SnapInfo{snapInfo}})
+		}
+	} else if len(srcVol) != 0 {
+		// Get all snapshots for source volume
+		snaps, err := gc.client.SnapshotList(srcVol)
+		if err != nil {
+			errResp := gc.client.LastErrorResponse()
+			if errResp != nil && errResp.StatusCode != http.StatusNotFound {
+				return nil, fmt.Errorf("[%s/%s]: %v", gc.url, gc.username, err)
+			}
+		}
+		snaplist = append(snaplist, snaps...)
+	} else {
+		// Get all snapshots in TSP
+		snaps, err := gc.client.SnapshotList("")
+		if err != nil {
+			return nil, fmt.Errorf("[%s/%s]: %v", gc.url, gc.username, err)
+		}
+		snaplist = append(snaplist, snaps...)
+	}
+
+	for _, snap := range snaplist {
+		for _, s := range snap.SnapList {
+			snaps = append(snaps, gc.csiSnap(s))
+		}
+
+	}
+	return snaps, nil
+}
+
+// Update returns a new gd2Client (GlusterClient) with updated parameters.
+// If a REST client has not yet been established, it is created and tested.
+func (gc gd2Client) Update(params map[string]string) (cli.GlusterClient, error) {
+	var err error
+
+	client := cli.GlusterClientCache.DefaultClient.(gd2Client)
+
+	client.url = cli.SetStringIfEmpty(gc.url, params["glusterurl"])
+	client.username = cli.SetStringIfEmpty(gc.username, params["glusteruser"])
+	client.password = cli.SetStringIfEmpty(gc.password, params["glustersecret"])
+	client.caCert = cli.SetStringIfEmpty(gc.caCert, params["glustercacert"])
+	client.insecure, client.insecureBool = gc.setInsecure(gd2DefaultInsecure)
+	client, err = gc.setClient(client)
+
+	return client, err
 }
