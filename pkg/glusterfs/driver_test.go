@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -13,7 +12,6 @@ import (
 	"github.com/gluster/gluster-csi-driver/pkg/glusterfs/utils"
 
 	"github.com/gluster/glusterd2/pkg/api"
-	"github.com/gluster/glusterd2/pkg/restclient"
 	"github.com/kubernetes-csi/csi-test/pkg/sanity"
 	"github.com/pborman/uuid"
 	"k8s.io/kubernetes/pkg/util/mount"
@@ -55,19 +53,7 @@ func TestDriverSuite(t *testing.T) {
 
 	defer ts.Close()
 
-	url, err := url.Parse(ts.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	doClient, err := restclient.New(url.String(), "", "", "", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	d := GfDriver{
-
-		client: doClient,
-	}
+	d := GfDriver{}
 	d.Config = new(utils.Config)
 	d.Endpoint = endpoint
 	d.NodeID = "testing"

@@ -3,7 +3,6 @@ package glusterfs
 import (
 	"github.com/gluster/gluster-csi-driver/pkg/glusterfs/utils"
 
-	"github.com/gluster/glusterd2/pkg/restclient"
 	"github.com/golang/glog"
 	"github.com/kubernetes-csi/drivers/pkg/csi-common"
 )
@@ -15,7 +14,6 @@ const (
 
 // GfDriver is the struct embedding information about the connection to gluster cluster and configuration of CSI driver.
 type GfDriver struct {
-	client *restclient.Client
 	*utils.Config
 }
 
@@ -29,13 +27,6 @@ func New(config *utils.Config) *GfDriver {
 	}
 
 	gfd.Config = config
-	var err error
-	gfd.client, err = restclient.New(config.RestURL, config.RestUser, config.RestSecret, "", false)
-
-	if err != nil {
-		glog.Errorf("error creating glusterd2 REST client: %s", err.Error())
-		return nil
-	}
 
 	glog.V(1).Infof("GlusterFS CSI driver initialized")
 
