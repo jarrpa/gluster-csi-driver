@@ -67,7 +67,7 @@ spec:
             - name: socket-dir
               mountPath: /var/lib/csi/sockets/pluginproxy/
         - name: heketi
-          image: gluster/heketi-controller-csi-driver
+          image: 192.168.121.1:5000/jarrpa/heketi-controller
           args:
             - "--v=5"
           env:

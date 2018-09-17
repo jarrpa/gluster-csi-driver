@@ -7,5 +7,4 @@ metadata:
     storageclass.beta.kubernetes.io/is-default-class: "true"
 provisioner: org.gluster.glusterfs
 parameters:
-  glusterurl: "http://192.168.121.182:24007"
-  glusterusersecret: "b03045b7988258557ecd3e136cd37ba3f928ea0831b3b1b7ed8ae238d36d9071"
+  glusterurl: "http://192.168.10.100:24007"

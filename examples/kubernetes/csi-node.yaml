@@ -51,7 +51,7 @@ spec:
             capabilities:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
-          image: gluster/glusterfs-node-csi-driver
+          image: 192.168.121.1:5000/jarrpa/glusterfs-node
           args:
             - "--v=5"
           env:
