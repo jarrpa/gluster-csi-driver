@@ -3,7 +3,7 @@
 set -e
 
 # Set which drivers to build
-DRIVERS="${DRIVERS:-glusterfs-controller glusterfs-node}"
+DRIVERS="${DRIVERS:-glusterfs-controller glusterfs-node heketi-controller}"
 
 # Set which docker repo to tag
 REPO="${REPO:-gluster/}"

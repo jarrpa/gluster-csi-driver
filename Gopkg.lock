@@ -197,6 +197,12 @@
   version = "v1.0.0"
 
 [[projects]]
+  name = "github.com/heketi/heketi"
+  packages = ["client/api/go-client","pkg/glusterfs/api","pkg/utils"]
+  revision = "bdf9128e2b7e9a66e89c0cfa5132c7328a1fa7fd"
+  version = "v8.0.0"
+
+[[projects]]
   digest = "1:b3c5b95e56c06f5aa72cb2500e6ee5f44fcd122872d4fec2023a488e561218bc"
   name = "github.com/hpcloud/tail"
   packages = [
@@ -252,6 +258,12 @@
   pruneopts = ""
   revision = "c2353362d570a7bfa228149c62842019201cfb71"
   version = "v1.8.0"
+
+[[projects]]
+  name = "github.com/lpabon/godbc"
+  packages = ["."]
+  revision = "432535de9415f4e0333804357bcdf9024bf5748b"
+  version = "v1.0"
 
 [[projects]]
   digest = "1:63722a4b1e1717be7b98fc686e0b30d5e7f734b9e93d7dee86293b6deab7ea28"
