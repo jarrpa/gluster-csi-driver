@@ -23,6 +23,7 @@ const (
 
 type gd2Client struct {
 	client       *restclient.Client
+	version      *api.VersionResp
 	driverName   string
 	url          string
 	username     string
@@ -76,8 +77,18 @@ func (gc gd2Client) setClient(client gd2Client) (gd2Client, error) {
 
 		gc.client = gd2
 	}
+	if gc.version == nil {
+		version, err := gc.client.Version()
+		if err != nil {
+			return gd2Client{}, fmt.Errorf("error detecting glusterd2 server version: %v", err)
+		}
+
+		gc.version = &version
+	}
 
 	client.client = gc.client
+	client.version = gc.version
+
 	return client, nil
 }
 
@@ -156,6 +167,8 @@ func (gc gd2Client) CreateVolume(volumeName string, volSizeBytes int64, params m
 		//before sending back the response
 		return fmt.Errorf("failed to start volume %s: %v", volumeName, err)
 	}
+
+	params["glusterdversion"] = gc.version.GlusterdVersion
 
 	return nil
 }

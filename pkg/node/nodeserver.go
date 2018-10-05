@@ -1,9 +1,11 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/gluster/gluster-csi-driver/pkg/command"
@@ -11,6 +13,7 @@ import (
 
 	api "github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"github.com/golang/glog"
+	vercomp "github.com/hashicorp/go-version"
 	csi "github.com/kubernetes-csi/drivers/pkg/csi-common"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -21,6 +24,7 @@ import (
 // Server struct of Glusterfs CSI driver with supported methods of CSI node server spec.
 type Server struct {
 	*command.Config
+	ClientVersion *vercomp.Version
 }
 
 // Run starts the node server
@@ -32,8 +36,29 @@ func Run(config *command.Config) {
 
 // NewServer instantiates a Server
 func NewServer(config *command.Config) *Server {
+	var out bytes.Buffer
+
+	// nolint: gosec
+	cmd := exec.Command("mount.glusterfs", "-V")
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		glog.Fatalf("failed to detect GlusterFS client version: %v", err)
+	}
+
+	verOut := strings.Split(out.String(), "\n")
+	verLine := strings.Split(verOut[0], " ")
+	version := verLine[1]
+	glog.Infof("found GlusterFS client version: %s", version)
+
+	cliVer, err := vercomp.NewVersion(version)
+	if err != nil {
+		glog.Fatalf("failed to parse GlusterFS client version %s: %v", version, err)
+	}
+
 	ns := &Server{
-		Config: config,
+		Config:        config,
+		ClientVersion: cliVer,
 	}
 
 	return ns
@@ -81,8 +106,15 @@ func (ns *Server) NodePublishVolume(ctx context.Context, req *api.NodePublishVol
 	}
 
 	attrs := req.GetVolumeAttributes()
+	gv := attrs["glusterdversion"]
 	gs := attrs["glusterserver"]
 	ep := attrs["glustervol"]
+
+	err = ns.versionCheck(gv)
+	if err != nil {
+		glog.Errorf("versionCheck error for %s: %v", gs, err)
+		return nil, status.Errorf(codes.FailedPrecondition, "versionCheck error for %s: %v", gs, err)
+	}
 
 	source := fmt.Sprintf("%s:%s", gs, ep)
 
@@ -108,6 +140,21 @@ func mountGlusterVolume(source, targetPath string, mountOptions []string) error 
 	}
 
 	return err
+}
+
+func (ns *Server) versionCheck(serverVersion string) error {
+	glog.V(2).Infof("GlusterFS Client Version: %s", ns.ClientVersion.String())
+	glog.V(2).Infof("glusterd Server Version: %s", serverVersion)
+
+	srvVer, err := vercomp.NewVersion(serverVersion)
+	if err != nil {
+		glog.Errorf("failed to parse GlusterD server version %s: %v", serverVersion, err)
+	} else if srvVer.LessThan(ns.ClientVersion) {
+		glog.Errorf("glusterd server version [%s] is less than GlusterFS client version [%s]", serverVersion, ns.ClientVersion)
+		// return fmt.Errorf("GlusterD server version [%s] is less than GlusterFS client version [%s]", serverVersion, ns.ClientVersion)
+	}
+
+	return nil
 }
 
 func (ns *Server) validateNodePublishVolumeReq(req *api.NodePublishVolumeRequest) error {

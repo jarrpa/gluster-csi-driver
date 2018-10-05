@@ -134,6 +134,8 @@ func (gc heketiClient) CreateVolume(volumeName string, volSizeBytes int64, param
 		return fmt.Errorf("failed to create volume %s: %v", volumeName, err)
 	}
 
+	params["glusterdversion"] = "4.0.0"
+
 	return nil
 }
 
