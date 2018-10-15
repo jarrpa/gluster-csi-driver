@@ -2,6 +2,8 @@ package client
 
 import (
 	"fmt"
+	"net"
+	"os"
 	"sync"
 
 	csi "github.com/container-storage-interface/spec/lib/go/csi/v0"
@@ -9,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 var errNotFoundStr = "not found"
@@ -120,7 +123,11 @@ func (gcc *GlusterClients) FindVolumeClient(volumeID, driverName string) (Gluste
 }
 
 func (gcc *GlusterClients) findVolumeClientPV(volumeID, driverName string) (GlusterClient, error) {
-	config, err := rest.InClusterConfig()
+	var err error
+	var config *rest.Config
+
+	host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
+	config, err = clientcmd.BuildConfigFromFlags("http://"+net.JoinHostPort(host, port), "")
 	if err != nil {
 		return nil, err
 	}
