@@ -14,6 +14,7 @@ language: go
 env:
   global:
     - GO_METALINTER_VERSION="v2.0.11"
+    - GO_METALINTER_THREADS=4
 
 go:
   # Kubernetes minimum_go_version can be found in this file:
@@ -24,16 +25,8 @@ install:
   - gem install asciidoctor mdl
   - pip install --user --upgrade pip
   - pip install --user yamllint
-  # install dep
-  - >
-    curl -L
-    https://raw.githubusercontent.com/golang/dep/master/install.sh
-    | sh
-  # install gometalinter
-  - >
-    curl -L
-    'https://raw.githubusercontent.com/alecthomas/gometalinter/master/scripts/install.sh'
-    | bash -s -- -b ${TRAVIS_HOME}/gopath/bin "${GO_METALINTER_VERSION}"
+  # install dep and gometalinter
+  - scripts/install-go-tools.sh
 
 script:
   # Lint text-like files
@@ -41,13 +34,7 @@ script:
   # Fetch vendor dependencies so linters succeed
   - dep ensure -v -vendor-only
   # Lint golang sources
-  - >
-    set -o pipefail;
-    gometalinter -j1 --sort=path --sort=line --sort=column
-    --enable="gofmt"
-    --exclude="method NodeGetId should be NodeGetID"
-    --deadline 9m --vendor --debug ./...
-    |& stdbuf -oL awk '/linter took/ || !/^DEBUG/'
+  - scripts/lint-go.sh
   # Build container w/ Docker
   - docker version
   - ./build.sh
